@@ -7,7 +7,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Terminal, Send, Trash2, History, Info, ChevronRight, Cpu, Activity, ShieldCheck } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Markdown from 'react-markdown';
-import { generateText, summarizeText, chatWithAI, sendToolResponse } from './services/geminiService';
+import { generateText, summarizeText, chatWithAI, sendToolResponse } from './services/aiService';
 
 type LogEntry = {
   id: string;
@@ -23,7 +23,7 @@ export default function App() {
     {
       id: 'welcome',
       type: 'system',
-      content: 'VibeTerm AI [Version 1.1.0]\n(c) 2026 VibeCorp. All rights reserved.\n\nType "help" to see available commands.',
+      content: 'VibeTerm AI [Version 1.2.0]\n(c) 2026 VibeCorp. All rights reserved.\n\nType "help" to see available commands.',
       timestamp: new Date(),
     },
   ]);
@@ -230,22 +230,31 @@ Available Commands:
             const context = projectFiles.length > 0 ? projectFiles.join(', ') : undefined;
             const fullContext = `CURRENT DIRECTORY: ${cwd}\n` + (context || "") + memoryContext;
             
-            let { response, chat } = await chatWithAI(fullArgs, fullContext);
+            let { response, messages } = await chatWithAI(fullArgs, fullContext);
             
             // Agentic Loop
             let iterations = 0;
             const MAX_ITERATIONS = 10;
 
-            while (response.functionCalls && iterations < MAX_ITERATIONS) {
+            while (response.tool_calls && iterations < MAX_ITERATIONS) {
               iterations++;
               const toolResults: any[] = [];
+              
+              // Add the assistant's message with tool calls to history
+              const assistantMessage = response;
+              const currentMessages = [...messages, assistantMessage];
 
-              for (const call of response.functionCalls) {
-                addLog('system', `Agent executing: ${call.name}(${JSON.stringify(call.args)})`);
+              for (const call of response.tool_calls) {
+                if (call.type !== 'function') continue;
+                
+                const functionName = call.function.name;
+                const args = JSON.parse(call.function.arguments);
+                
+                addLog('system', `Agent executing: ${functionName}(${JSON.stringify(args)})`);
                 
                 let result;
                 try {
-                  switch (call.name) {
+                  switch (functionName) {
                     case 'list_files':
                       const lsAllRes = await fetch('/api/files');
                       result = await lsAllRes.json();
@@ -256,20 +265,20 @@ Available Commands:
                       result = await lsDirRes.json();
                       break;
                     case 'read_file':
-                      const readRes = await fetch(`/api/files/content?path=${encodeURIComponent(call.args.path as string)}`);
+                      const readRes = await fetch(`/api/files/content?path=${encodeURIComponent(args.path as string)}`);
                       result = await readRes.json();
                       break;
                     case 'write_file':
                       const writeRes = await fetch('/api/files/write', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ path: call.args.path, content: call.args.content })
+                        body: JSON.stringify({ path: args.path, content: args.content })
                       });
                       result = await writeRes.json();
                       await fetchFiles(); // Refresh file list
                       break;
                     case 'delete_file':
-                      const delRes = await fetch(`/api/files/delete?path=${encodeURIComponent(call.args.path as string)}`, {
+                      const delRes = await fetch(`/api/files/delete?path=${encodeURIComponent(args.path as string)}`, {
                         method: 'DELETE'
                       });
                       result = await delRes.json();
@@ -279,31 +288,32 @@ Available Commands:
                       const cdRes = await fetch('/api/files/cd', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ path: call.args.path })
+                        body: JSON.stringify({ path: args.path })
                       });
                       result = await cdRes.json();
                       if (result.cwd) setCwd(result.cwd);
                       break;
                     default:
-                      result = { error: `Unknown tool: ${call.name}` };
+                      result = { error: `Unknown tool: ${functionName}` };
                   }
                 } catch (err: any) {
                   result = { error: err.message };
                 }
                 
                 toolResults.push({
-                  functionResponse: {
-                    name: call.name,
-                    response: result
-                  }
+                  role: "tool",
+                  tool_call_id: call.id,
+                  content: JSON.stringify(result)
                 });
               }
 
               // Send tool results back to the model
-              response = await sendToolResponse(chat, toolResults);
+              const nextStep = await sendToolResponse(currentMessages, toolResults);
+              response = nextStep.response;
+              messages = nextStep.messages;
             }
 
-            addLog('output', response.text || 'Task completed.');
+            addLog('output', response.content || 'Task completed.');
           }
           break;
 
@@ -326,8 +336,8 @@ Available Commands:
         case 'info':
           addLog('system', `
 System Status:
-  Kernel: VibeOS 2.1.0-stable
-  AI Engine: Gemini 3.1 Pro
+  Kernel: VibeOS 2.2.0-stable
+  AI Engine: OpenAI GPT-4o
   Latency: Optimized
   Security: Encrypted
   Environment: AI Studio Sandbox
