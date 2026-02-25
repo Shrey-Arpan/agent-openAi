@@ -4,7 +4,13 @@ const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
 
 const listFilesTool: FunctionDeclaration = {
   name: "list_files",
-  description: "List all files in the current project directory.",
+  description: "List all files in the entire project directory recursively.",
+  parameters: { type: Type.OBJECT, properties: {} }
+};
+
+const listDirTool: FunctionDeclaration = {
+  name: "list_dir",
+  description: "List the contents of the current working directory (non-recursive).",
   parameters: { type: Type.OBJECT, properties: {} }
 };
 
@@ -45,6 +51,18 @@ const deleteFileTool: FunctionDeclaration = {
   }
 };
 
+const cdTool: FunctionDeclaration = {
+  name: "cd",
+  description: "Change the current working directory.",
+  parameters: {
+    type: Type.OBJECT,
+    properties: {
+      path: { type: Type.STRING, description: "The path to navigate to (e.g., 'src', '..', '/')." }
+    },
+    required: ["path"]
+  }
+};
+
 export const generateText = async (prompt: string) => {
   const response = await ai.models.generateContent({
     model: "gemini-3.1-pro-preview",
@@ -78,7 +96,7 @@ export const chatWithAI = async (message: string, projectContext?: string, histo
       
       When the user asks you to perform a task, use the provided tools to execute the task.
       Always explain what you are doing. If you need to see a file's content before editing it, use read_file first.`,
-      tools: [{ functionDeclarations: [listFilesTool, readFileTool, writeFileTool, deleteFileTool] }]
+      tools: [{ functionDeclarations: [listFilesTool, listDirTool, readFileTool, writeFileTool, deleteFileTool, cdTool] }]
     },
     history: history
   });

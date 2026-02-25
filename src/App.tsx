@@ -23,7 +23,7 @@ export default function App() {
     {
       id: 'welcome',
       type: 'system',
-      content: 'VibeTerm AI [Version 1.0.42]\n(c) 2026 VibeCorp. All rights reserved.\n\nType "help" to see available commands.',
+      content: 'VibeTerm AI [Version 1.1.0]\n(c) 2026 VibeCorp. All rights reserved.\n\nType "help" to see available commands.',
       timestamp: new Date(),
     },
   ]);
@@ -31,6 +31,7 @@ export default function App() {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [projectFiles, setProjectFiles] = useState<string[]>([]);
+  const [cwd, setCwd] = useState('/');
   
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,7 +89,8 @@ export default function App() {
         case 'help':
           addLog('system', `
 Available Commands:
-  ls               - List project files
+  ls               - List current directory contents
+  cd <path>        - Change current directory
   read <path>      - Read a specific file's content
   write <path> <content> - Create/overwrite a file
   delete <path>    - Delete a specific file
@@ -141,11 +143,40 @@ Available Commands:
           break;
 
         case 'ls':
-          await fetchFiles();
-          addLog('system', projectFiles.length > 0 
-            ? projectFiles.join('\n')
-            : 'No files found or indexing...'
-          );
+          try {
+            const res = await fetch('/api/files/ls');
+            const data = await res.json();
+            if (data.error) {
+              addLog('error', `Error: ${data.error}`);
+            } else {
+              const items = data.contents.map((item: any) => 
+                item.isDirectory ? `[DIR]  ${item.name}/` : `[FILE] ${item.name}`
+              );
+              addLog('system', `Directory: ${data.cwd}\n\n${items.join('\n')}`);
+              setCwd(data.cwd);
+            }
+          } catch (err: any) {
+            addLog('error', `Error: ${err.message}`);
+          }
+          break;
+
+        case 'cd':
+          if (!fullArgs) {
+            addLog('error', 'Error: Path required. Usage: cd <path>');
+          } else {
+            const res = await fetch('/api/files/cd', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: fullArgs })
+            });
+            const data = await res.json();
+            if (data.error) {
+              addLog('error', `Error: ${data.error}`);
+            } else {
+              setCwd(data.cwd);
+              addLog('system', `Changed directory to: ${data.cwd}`);
+            }
+          }
           break;
 
         case 'read':
@@ -197,7 +228,7 @@ Available Commands:
             }
 
             const context = projectFiles.length > 0 ? projectFiles.join(', ') : undefined;
-            const fullContext = (context || "") + memoryContext;
+            const fullContext = `CURRENT DIRECTORY: ${cwd}\n` + (context || "") + memoryContext;
             
             let { response, chat } = await chatWithAI(fullArgs, fullContext);
             
@@ -216,9 +247,13 @@ Available Commands:
                 try {
                   switch (call.name) {
                     case 'list_files':
-                      const lsRes = await fetch('/api/files');
-                      result = await lsRes.json();
+                      const lsAllRes = await fetch('/api/files');
+                      result = await lsAllRes.json();
                       if (result.files) setProjectFiles(result.files);
+                      break;
+                    case 'list_dir':
+                      const lsDirRes = await fetch('/api/files/ls');
+                      result = await lsDirRes.json();
                       break;
                     case 'read_file':
                       const readRes = await fetch(`/api/files/content?path=${encodeURIComponent(call.args.path as string)}`);
@@ -239,6 +274,15 @@ Available Commands:
                       });
                       result = await delRes.json();
                       await fetchFiles(); // Refresh file list
+                      break;
+                    case 'cd':
+                      const cdRes = await fetch('/api/files/cd', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ path: call.args.path })
+                      });
+                      result = await cdRes.json();
+                      if (result.cwd) setCwd(result.cwd);
                       break;
                     default:
                       result = { error: `Unknown tool: ${call.name}` };
@@ -425,7 +469,7 @@ System Status:
         <div className="p-6 bg-black/20 border-t border-terminal-muted/10 shrink-0">
           <div className="relative flex items-center gap-3">
             <span className="text-terminal-accent font-bold shrink-0">
-              $
+              {cwd} $
             </span>
             <input
               ref={inputRef}

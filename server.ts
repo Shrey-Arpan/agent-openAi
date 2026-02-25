@@ -13,7 +13,60 @@ async function startServer() {
 
   app.use(express.json());
 
-  // API: List all files in the project (excluding node_modules, dist, etc.)
+  let currentCwd = ""; // Relative to __dirname
+
+  // API: List contents of a directory (non-recursive)
+  app.get("/api/files/ls", (req, res) => {
+    const targetDir = path.join(__dirname, currentCwd);
+    try {
+      const list = fs.readdirSync(targetDir, { withFileTypes: true });
+      const contents = list
+        .filter(item => !['node_modules', '.git', 'dist', '.next', '.cache'].includes(item.name))
+        .map(item => ({
+          name: item.name,
+          isDirectory: item.isDirectory()
+        }));
+      res.json({ contents, cwd: currentCwd || "/" });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: Change directory
+  app.post("/api/files/cd", (req, res) => {
+    const { path: newPath } = req.body;
+    if (newPath === undefined) return res.status(400).json({ error: "Path is required" });
+
+    let targetPath;
+    if (newPath === "..") {
+      targetPath = path.dirname(currentCwd);
+      if (targetPath === ".") targetPath = "";
+    } else if (newPath === "/" || newPath === "~") {
+      targetPath = "";
+    } else {
+      targetPath = path.join(currentCwd, newPath);
+    }
+
+    const fullPath = path.join(__dirname, targetPath);
+
+    // Security check
+    if (!fullPath.startsWith(__dirname)) {
+      return res.status(403).json({ error: "Access denied: Cannot go above project root" });
+    }
+
+    try {
+      if (fs.existsSync(fullPath) && fs.statSync(fullPath).isDirectory()) {
+        currentCwd = targetPath;
+        res.json({ success: true, cwd: currentCwd || "/" });
+      } else {
+        res.status(404).json({ error: "Directory not found" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // API: List all files in the project (recursive) - for AI context
   app.get("/api/files", (req, res) => {
     const rootDir = __dirname;
     const files: string[] = [];
@@ -59,9 +112,7 @@ async function startServer() {
       return res.status(400).json({ error: "Path is required" });
     }
 
-    const fullPath = path.join(__dirname, filePath);
-
-    // Security check: ensure the path is within the project directory
+    const fullPath = path.join(__dirname, currentCwd, filePath);
     if (!fullPath.startsWith(__dirname)) {
       return res.status(403).json({ error: "Access denied" });
     }
@@ -84,7 +135,7 @@ async function startServer() {
       return res.status(400).json({ error: "Path and content are required" });
     }
 
-    const fullPath = path.join(__dirname, filePath);
+    const fullPath = path.join(__dirname, currentCwd, filePath);
 
     if (!fullPath.startsWith(__dirname)) {
       return res.status(403).json({ error: "Access denied" });
@@ -109,7 +160,7 @@ async function startServer() {
       return res.status(400).json({ error: "Path is required" });
     }
 
-    const fullPath = path.join(__dirname, filePath);
+    const fullPath = path.join(__dirname, currentCwd, filePath);
 
     if (!fullPath.startsWith(__dirname)) {
       return res.status(403).json({ error: "Access denied" });
