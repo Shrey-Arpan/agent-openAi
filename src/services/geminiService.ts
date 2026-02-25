@@ -70,7 +70,13 @@ export const chatWithAI = async (message: string, projectContext?: string, histo
       
       ${projectContext ? `Current Project Context (Files):\n${projectContext}` : ""}
       
-      When the user asks you to perform a task (e.g., "create a new component"), use the provided tools to execute the task.
+      MEMORY MANAGEMENT:
+      You maintain a file named 'ai.md' which acts as your long-term memory. 
+      1. ALWAYS read 'ai.md' at the start of a task if it exists to understand your history.
+      2. After completing a task successfully, you MUST update 'ai.md' with a brief summary of what you did, the date, and the outcome.
+      3. If 'ai.md' does not exist, create it.
+      
+      When the user asks you to perform a task, use the provided tools to execute the task.
       Always explain what you are doing. If you need to see a file's content before editing it, use read_file first.`,
       tools: [{ functionDeclarations: [listFilesTool, readFileTool, writeFileTool, deleteFileTool] }]
     },

@@ -184,8 +184,22 @@ Available Commands:
           if (!fullArgs) {
             addLog('error', 'Error: Message required. Usage: chat <message>');
           } else {
+            // Try to fetch memory from ai.md
+            let memoryContext = "";
+            try {
+              const memRes = await fetch(`/api/files/content?path=ai.md`);
+              const memData = await memRes.json();
+              if (memData.content) {
+                memoryContext = `\nLONG-TERM MEMORY (ai.md):\n${memData.content}\n`;
+              }
+            } catch (e) {
+              // ai.md might not exist yet, that's fine
+            }
+
             const context = projectFiles.length > 0 ? projectFiles.join(', ') : undefined;
-            let { response, chat } = await chatWithAI(fullArgs, context);
+            const fullContext = (context || "") + memoryContext;
+            
+            let { response, chat } = await chatWithAI(fullArgs, fullContext);
             
             // Agentic Loop
             let iterations = 0;
